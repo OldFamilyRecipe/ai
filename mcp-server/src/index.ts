@@ -26,7 +26,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { handleRecipeCreate, handleRecipeImportImage, handleRecipeSearch, handleRecipeList, handleRecipeUpdate, handleRecipeDelete, handleSageChat, handleSageMealPlan, handleMealPlanGet, handleMealPlanUpdate, handleImageUpload, handleFamilyInvite } from "./handlers.js";
+import { handleRecipeCreate, handleRecipeImportImage, handleRecipeSearch, handleRecipeList, handleRecipeUpdate, handleRecipeDelete, handleSageChat, handleSageMealPlan, handleMealPlanGet, handleMealPlanUpdate, handleImageUpload, handleFamilyInvite, handleFamilyTree } from "./handlers.js";
 
 const API_KEY = process.env.OFR_API_KEY ?? "";
 const API_BASE = process.env.OFR_API_URL ?? "https://api.oldfamilyrecipe.com";
@@ -259,14 +259,38 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     // TODO: shopping_list backend not yet implemented — re-add when /meal-plans/shopping-list ships
     {
       name: "family_invite",
-      description: "Invite a family member to your cookbook. They can view recipes (viewer) or view and add (editor).",
+      description:
+        "Invite a family member to your cookbook. They can view recipes (viewer) or view and add (editor). " +
+        "Optionally capture how they're related to the inviter (sister, spouse, cousin, etc., or free text up to 40 chars) — " +
+        "this surfaces on the family tree under their name and is preserved across generations.",
       inputSchema: {
         type: "object" as const,
         properties: {
           email: { type: "string", description: "Email address to invite" },
           role: { type: "string", enum: ["editor", "viewer"], description: "Role (default: viewer)" },
+          relationship: {
+            type: "string",
+            description:
+              "Optional. Relationship of the invitee to the inviter. Canonical lowercased values: " +
+              "'sister', 'brother', 'parent', 'child' (or 'son'/'daughter'), 'spouse', 'grandparent', " +
+              "'grandchild', 'aunt', 'uncle', 'niece', 'nephew', 'cousin', 'in-law', 'friend'. " +
+              "Free text is also accepted (trimmed; backend caps at 40 chars). Always optional — never blocks the invite.",
+            maxLength: 40,
+          },
         },
         required: ["email"],
+      },
+    },
+    {
+      name: "family_tree",
+      description:
+        "Returns the invite graph for the caller's family — root user (tenant owner) plus everyone they (and their invitees) " +
+        "have invited. Each node includes optional `relationshipToInviter` (e.g. 'sister', 'cousin') captured at invite time. " +
+        "Null for the root node and for legacy users who joined before the relationship field shipped (2026-05-03). " +
+        "Use to summarize 'who's in my family cookbook' or to recall how members are related.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {},
       },
     },
   ],
@@ -332,6 +356,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return handleImageUpload(args ?? {}, config);
     case "family_invite":
       return handleFamilyInvite(args ?? {}, config);
+    case "family_tree":
+      return handleFamilyTree(args ?? {}, config);
     default:
       return {
         content: [{ type: "text" as const, text: `Unknown tool: ${name}` }],
@@ -356,7 +382,7 @@ async function main() {
       "https://oldfamilyrecipe.ai/dashboard"
     );
   } else {
-    console.error("[OFR MCP] Connected. 12 tools available. Free tier: 250 Sage messages/month.");
+    console.error("[OFR MCP] Connected. 13 tools available. Free tier: 250 Sage messages/month.");
   }
 }
 

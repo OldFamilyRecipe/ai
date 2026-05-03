@@ -2,6 +2,34 @@
 
 All notable changes to `@oldfamilyrecipe/mcp-server` will be documented here.
 
+## [0.2.0] — 2026-05-03
+
+### Added
+- **`family_invite`** tool now accepts an optional `relationship` parameter
+  (string, max 40 chars). Captures how the invitee is related to the inviter
+  (e.g. `sister`, `spouse`, `cousin`, or any free-text value). Always
+  optional; empty / whitespace-only / non-string values are silently coerced
+  to null and never block the invite. Mirrors the consumer-side schema
+  shipped in monorepo migration 026 (PR #677).
+- **`family_tree`** tool — new read-only tool that returns the invite graph
+  for the caller's tenant. Each `FamilyTreeNode` includes `userId`, `name`,
+  `email`, `role`, `joinedAt`, `invitedBy`, and the new
+  `relationshipToInviter: string | null` field. Null for the root node and
+  for legacy users who joined before relationship capture.
+- Protocol spec (`spec/README.md`, `spec/openapi.yaml`) updated with a new
+  Family Sharing section, the canonical relationship lexicon, the
+  `FamilyTreeNode` schema, and the `GET /family/tree` endpoint definition.
+  Schema parity with the consumer API as of 2026-05-03.
+
+### Notes
+- This is a non-breaking, additive schema change. SDK consumers reading
+  responses from older API revisions will see `relationshipToInviter: null`
+  (or the field absent) — clients MUST handle null gracefully.
+- 11 new unit tests in `src/handlers.test.ts` covering relationship
+  forwarding, normalization (trim + 40-char cap), absence omission, and
+  the `family_tree` happy-path / empty / error responses. 59 tests total,
+  up from 48.
+
 ## [0.1.5] — 2026-05-01
 
 ### Security

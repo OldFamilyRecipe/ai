@@ -17,12 +17,14 @@ import assert from "node:assert/strict";
 
 import {
   handleFamilyInvite,
+  handleFamilyTree,
   handleMealPlanUpdate,
   handleMealPlanGet,
   handleSageMealPlan,
   handleRecipeImportImage,
   currentWeekIdSundayLocal,
   normalizeMealSlot,
+  normalizeRelationship,
   sageMealPlanToSlots,
 } from "./handlers.js";
 
@@ -90,6 +92,188 @@ test("family_invite returns isError when email is missing (no API call)", async 
     const res = await handleFamilyInvite({}, cfg);
     assert.strictEqual(calls.length, 0);
     assert.strictEqual(res.isError, true);
+  } finally {
+    restore();
+  }
+});
+
+// --- family_invite relationship parity (consumer PR #677, 2026-05-03) -----
+
+// PR #677 in solidphp/oldfamilyrecipe added an optional `relationship`
+// field on POST /family/invite (sister/spouse/cousin/… or free text up
+// to 40 chars). The MCP tool must forward it when provided AND omit it
+// when absent so older API revisions don't choke on a stray field.
+
+test("family_invite forwards `relationship` when provided", async () => {
+  const { calls, restore } = installFetchMock({ status: 201, jsonBody: { ok: true } });
+  try {
+    await handleFamilyInvite(
+      { email: "sister@example.com", role: "editor", relationship: "sister" },
+      cfg
+    );
+    assert.deepStrictEqual(calls[0].body, {
+      email: "sister@example.com",
+      role: "editor",
+      relationship: "sister",
+    });
+  } finally {
+    restore();
+  }
+});
+
+test("family_invite OMITS `relationship` from body when absent (not null/undefined wire field)", async () => {
+  const { calls, restore } = installFetchMock({ status: 201, jsonBody: { ok: true } });
+  try {
+    await handleFamilyInvite({ email: "uncle@example.com", role: "viewer" }, cfg);
+    const body = calls[0].body as Record<string, unknown>;
+    assert.deepStrictEqual(body, { email: "uncle@example.com", role: "viewer" });
+    assert.ok(!("relationship" in body), "absent relationship must not appear in wire body at all");
+  } finally {
+    restore();
+  }
+});
+
+test("family_invite trims + length-caps free-text relationship at 40 chars", async () => {
+  const { calls, restore } = installFetchMock({ status: 201, jsonBody: { ok: true } });
+  try {
+    const long = "  great-great-great-great-great-great-grandmother-in-law  ";
+    await handleFamilyInvite({ email: "x@y.com", role: "viewer", relationship: long }, cfg);
+    const body = calls[0].body as { relationship: string };
+    assert.strictEqual(body.relationship.length, 40, "must be capped at 40 to match DB column");
+    assert.strictEqual(body.relationship, "great-great-great-great-great-great-gran");
+  } finally {
+    restore();
+  }
+});
+
+test("family_invite drops empty / whitespace-only relationship (omits from body)", async () => {
+  const { calls, restore } = installFetchMock({ status: 201, jsonBody: { ok: true } });
+  try {
+    await handleFamilyInvite({ email: "a@b.com", role: "viewer", relationship: "   " }, cfg);
+    const body = calls[0].body as Record<string, unknown>;
+    assert.ok(!("relationship" in body));
+  } finally {
+    restore();
+  }
+});
+
+test("family_invite success message mentions relationship when sent", async () => {
+  const { restore } = installFetchMock({ status: 201, jsonBody: { ok: true } });
+  try {
+    const res = await handleFamilyInvite(
+      { email: "cousin@example.com", role: "viewer", relationship: "cousin" },
+      cfg
+    );
+    assert.ok(!res.isError);
+    assert.ok(res.content[0].text.toLowerCase().includes("cousin"));
+  } finally {
+    restore();
+  }
+});
+
+test("normalizeRelationship coerces non-string and empty inputs to undefined", () => {
+  assert.strictEqual(normalizeRelationship(undefined), undefined);
+  assert.strictEqual(normalizeRelationship(null), undefined);
+  assert.strictEqual(normalizeRelationship(123), undefined);
+  assert.strictEqual(normalizeRelationship(""), undefined);
+  assert.strictEqual(normalizeRelationship("   "), undefined);
+});
+
+test("normalizeRelationship trims + caps at 40", () => {
+  assert.strictEqual(normalizeRelationship("  sister  "), "sister");
+  assert.strictEqual(normalizeRelationship("a".repeat(50))?.length, 40);
+});
+
+// --- family_tree (added 2026-05-03 for protocol parity) -------------------
+
+test("family_tree calls GET /family/tree (no body, no query params)", async () => {
+  const { calls, restore } = installFetchMock({
+    status: 200,
+    jsonBody: { rootUserId: "u1", tenantName: "Rockwell Family", nodes: [] },
+  });
+  try {
+    await handleFamilyTree({}, cfg);
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].url, "https://api.example.com/family/tree");
+    assert.strictEqual(calls[0].method, "GET");
+    assert.strictEqual(calls[0].body, undefined, "tree fetch sends no request body");
+  } finally {
+    restore();
+  }
+});
+
+test("family_tree surfaces `relationshipToInviter` for each node + handles null gracefully", async () => {
+  const { restore } = installFetchMock({
+    status: 200,
+    jsonBody: {
+      rootUserId: "u1",
+      tenantName: "Rockwell Family",
+      nodes: [
+        {
+          userId: "u1",
+          name: "Andy",
+          email: "andy@example.com",
+          role: "owner",
+          joinedAt: "2026-01-01T00:00:00Z",
+          invitedBy: null,
+          relationshipToInviter: null, // root never has a relationship
+        },
+        {
+          userId: "u2",
+          name: "Maggie",
+          email: "maggie@example.com",
+          role: "editor",
+          joinedAt: "2026-05-03T00:00:00Z",
+          invitedBy: "u1",
+          relationshipToInviter: "sister",
+        },
+        {
+          userId: "u3",
+          name: "Legacy User",
+          email: "legacy@example.com",
+          role: "viewer",
+          joinedAt: "2026-02-01T00:00:00Z",
+          invitedBy: "u1",
+          relationshipToInviter: null, // legacy pre-026 user
+        },
+      ],
+    },
+  });
+  try {
+    const res = await handleFamilyTree({}, cfg);
+    assert.ok(!res.isError);
+    const txt = res.content[0].text;
+    assert.ok(txt.includes("Maggie"), "renders node names");
+    assert.ok(txt.includes("sister"), "surfaces relationshipToInviter when present");
+    assert.ok(txt.includes("Legacy User"), "renders legacy users with null relationship");
+    assert.ok(!txt.includes("null"), "must not render the literal string 'null' for missing relationship");
+    assert.ok(!txt.includes("as null"), "must not say 'as null'");
+    assert.ok(txt.includes("Rockwell Family"), "includes tenant name");
+  } finally {
+    restore();
+  }
+});
+
+test("family_tree returns friendly message when nodes array is empty", async () => {
+  const { restore } = installFetchMock({
+    status: 200,
+    jsonBody: { rootUserId: null, tenantName: "", nodes: [] },
+  });
+  try {
+    const res = await handleFamilyTree({}, cfg);
+    assert.ok(!res.isError);
+    assert.ok(res.content[0].text.toLowerCase().includes("no family tree"));
+  } finally {
+    restore();
+  }
+});
+
+test("family_tree returns isError on backend failure (e.g. 401)", async () => {
+  const { restore } = installFetchMock({ status: 401, jsonBody: { error: "Unauthorized" } });
+  try {
+    const res = await handleFamilyTree({}, cfg);
+    assert.strictEqual(res.isError, true);
+    assert.ok(res.content[0].text.includes("401"));
   } finally {
     restore();
   }

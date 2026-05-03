@@ -30,7 +30,7 @@ Same pattern for Cursor, Claude Code, Cline, Windsurf.
 **3. Restart your client and ask:**
 > "Save my mom's stuffing recipe from this photo." (attach image)
 
-## Tools (12)
+## Tools (13)
 
 | Tool | What it does |
 |---|---|
@@ -45,7 +45,8 @@ Same pattern for Cursor, Claude Code, Cline, Windsurf.
 | `meal_plan_get` | Get your meal plan for a given week. |
 | `meal_plan_update` | Set meals for specific days and slots. |
 | `image_upload` | Get a presigned URL to upload an image (recipe photo, card scan). |
-| `family_invite` | Invite a family member to your cookbook. |
+| `family_invite` | Invite a family member to your cookbook (with optional `relationship` — sister/spouse/cousin/etc.). |
+| `family_tree` | Read the invite graph for your family — who invited whom, plus each member's `relationshipToInviter`. |
 
 Full protocol reference: [oldfamilyrecipe.ai/spec](https://oldfamilyrecipe.ai/spec)
 
@@ -55,7 +56,7 @@ Calls share the monthly Sage budget shown on your [dashboard](https://oldfamilyr
 
 - `recipe_import_image` — counts against Sage quota (server-side Vision OCR)
 - `sage_chat`, `sage_meal_plan` — Sage messages
-- `recipe_*`, `meal_plan_*`, `image_upload`, `family_invite` — covered by per-tool rate limits, not the Sage budget
+- `recipe_*`, `meal_plan_*`, `image_upload`, `family_invite`, `family_tree` — covered by per-tool rate limits, not the Sage budget
 
 Free tier: 250 Sage messages/month + unlimited recipe storage. Upgrade at [oldfamilyrecipe.com/pricing](https://oldfamilyrecipe.com/pricing) for higher limits and family sharing.
 
@@ -80,6 +81,14 @@ Once configured, talk to your AI naturally. It will pick the right tools:
 **Search:**
 > "Find all the stuffing recipes in our cookbook."
 > → calls `recipe_search`
+
+**Invite a family member with relationship:**
+> "Invite my sister Maggie at maggie@example.com — make her an editor."
+> → calls `family_invite` with `{ email: "maggie@example.com", role: "editor", relationship: "sister" }`
+
+**Read the family tree:**
+> "Who's in my family cookbook and how are we all related?"
+> → calls `family_tree`, returns each node's `relationshipToInviter` (e.g. _Maggie — sister_, _Cousin Pat — cousin_; null for the root and legacy users)
 
 ## Requirements
 

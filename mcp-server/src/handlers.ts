@@ -585,6 +585,22 @@ export async function handleImageUpload(args: Record<string, unknown>, config: A
 
 // --- family_invite ---
 
+/**
+ * Normalize an optional relationship-to-inviter value matching the consumer
+ * frontend convention (see `frontend/src/components/family-sharing/relationshipOptions.ts`)
+ * and the backend `normalizeInviteRelationship` in
+ * `infrastructure/src/lambdas/recipes/family-invite-handlers.ts`. Empty /
+ * non-string / whitespace-only → undefined (omitted from the wire body
+ * entirely; the backend silently null-coerces). Otherwise trimmed and
+ * length-capped at 40 chars to match the DB column width.
+ */
+export function normalizeRelationship(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return undefined;
+  return trimmed.slice(0, 40);
+}
+
 export async function handleFamilyInvite(args: Record<string, unknown>, config: ApiConfig): Promise<ToolResult> {
   // Backend route is POST /family/invite (singular, no trailing 's'). The
   // pre-2026-04-30 path of /family/invitations 404'd unconditionally — every
@@ -595,7 +611,99 @@ export async function handleFamilyInvite(args: Record<string, unknown>, config: 
   const role = (args.role as string) ?? "viewer";
   if (!email) return text("Email address is required.", true);
 
-  const result = await callApi(config, "/family/invite", "POST", { email, role });
-  if (result.ok) return text(`Family invitation sent to ${email} (role: ${role}).`);
+  // Optional `relationship` (sister/spouse/cousin/… or free-text up to 40
+  // chars) — added 2026-05-03 in monorepo migration 026 to capture durable
+  // family-tree metadata at invite time. Always optional; never blocks the
+  // invite. Omit from body when absent so older API revisions ignore the
+  // field cleanly.
+  const relationship = normalizeRelationship(args.relationship);
+  const body: Record<string, unknown> = { email, role };
+  if (relationship !== undefined) body.relationship = relationship;
+
+  const result = await callApi(config, "/family/invite", "POST", body);
+  if (result.ok) {
+    const relationshipNote = relationship ? ` (relationship: ${relationship})` : "";
+    return text(`Family invitation sent to ${email} (role: ${role})${relationshipNote}.`);
+  }
   return text(`Failed to send invite (${result.status}): ${JSON.stringify(result.data)}`, true);
+}
+
+// --- family_tree ---
+
+/**
+ * Family tree node — one user in the caller's tenant. Mirrors the backend
+ * `FamilyTreeNode` interface in
+ * `infrastructure/src/lambdas/recipes/family-handlers.ts`.
+ *
+ * `relationshipToInviter` was added 2026-05-03 (consumer PR #677, monorepo
+ * migration 026): the inviter declares the new member's relationship at
+ * invite time (e.g. "this user is my sister" → 'sister'). Null for the
+ * root tenant-owner node and for legacy users who joined before relationship
+ * capture. AI agents MUST handle null gracefully.
+ */
+export interface FamilyTreeNode {
+  userId: string;
+  name: string;
+  email: string;
+  role: "owner" | "admin" | "editor" | "viewer" | "member";
+  joinedAt: string | null;
+  invitedBy: string | null;
+  relationshipToInviter: string | null;
+}
+
+export interface FamilyTreeResponse {
+  rootUserId: string | null;
+  tenantName: string;
+  nodes: FamilyTreeNode[];
+}
+
+export async function handleFamilyTree(_args: Record<string, unknown>, config: ApiConfig): Promise<ToolResult> {
+  // Backend GET /family/tree returns `{rootUserId, tenantName, nodes[]}` for
+  // the caller's tenant (multi-tenancy is JWT/api-key driven — there's no
+  // `tenant_id` query parameter). The handler lives in
+  // `infrastructure/src/lambdas/recipes/family-handlers.ts:handleGetFamilyTree`.
+  const result = await callApi(config, "/family/tree", "GET");
+  if (!result.ok) {
+    return text(`Failed to load family tree (${result.status}): ${JSON.stringify(result.data)}`, true);
+  }
+  const data = result.data as FamilyTreeResponse;
+  const nodes = Array.isArray(data?.nodes) ? data.nodes : [];
+  if (nodes.length === 0) {
+    return text("No family tree yet — invite someone with `family_invite` to get started.");
+  }
+  // Render a compact text tree the AI can summarize. Includes
+  // relationshipToInviter when present; explicitly omits it for null so the
+  // AI doesn't say "as null" or fabricate a relationship.
+  const byParent = new Map<string | null, FamilyTreeNode[]>();
+  for (const node of nodes) {
+    const parent = node.invitedBy;
+    if (!byParent.has(parent)) byParent.set(parent, []);
+    byParent.get(parent)!.push(node);
+  }
+  const lines: string[] = [];
+  function render(node: FamilyTreeNode, depth: number): void {
+    const indent = "  ".repeat(depth);
+    const rel = node.relationshipToInviter ? ` — ${node.relationshipToInviter}` : "";
+    lines.push(`${indent}- ${node.name} <${node.email}> [${node.role}]${rel}`);
+    const children = byParent.get(node.userId) ?? [];
+    for (const child of children) render(child, depth + 1);
+  }
+  const root = nodes.find((n) => n.userId === data.rootUserId) ?? nodes[0];
+  render(root, 0);
+  // Append any orphan nodes that didn't surface via the recursion (defensive
+  // — backend re-parents orphans under root, so this is belt-and-suspenders).
+  const seen = new Set<string>();
+  function collectSeen(node: FamilyTreeNode): void {
+    seen.add(node.userId);
+    for (const child of byParent.get(node.userId) ?? []) collectSeen(child);
+  }
+  collectSeen(root);
+  for (const node of nodes) {
+    if (!seen.has(node.userId)) {
+      const rel = node.relationshipToInviter ? ` — ${node.relationshipToInviter}` : "";
+      lines.push(`- (orphan) ${node.name} <${node.email}> [${node.role}]${rel}`);
+    }
+  }
+  const header = `Family tree for ${data.tenantName || "your cookbook"} (${nodes.length} member${nodes.length === 1 ? "" : "s"}):\n\n`;
+  return text(header + lines.join("\n"));
 }

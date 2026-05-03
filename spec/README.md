@@ -425,11 +425,133 @@ Weekly meal planning powered by Sage.
 - Accounts for leftovers and ingredient reuse across the week.
 - Can generate a consolidated grocery list for the plan.
 
-## 5. Authentication
+## 5. Family Sharing
+
+A cookbook can be shared across a family. The owner invites members by email; each invitation captures (optionally) the relationship of the invitee to the inviter (e.g. "this user is my sister"), which then surfaces on the family tree under the new member's name.
+
+Provenance is genealogical, not just culinary — recipes belong to *someone*, and so do the family members carrying them forward.
+
+### 5.1 Invite a Family Member
+
+**Endpoint:** `POST /family/invite`
+
+**Request:**
+```json
+{
+  "email": "sister@example.com",
+  "role": "editor",
+  "relationship": "sister"
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `email` | string | Yes | Invitee's email address |
+| `role` | enum | Yes | `editor` (view + add) or `viewer` (view only) |
+| `relationship` | string | No | Relationship of invitee to the inviter. Optional, max 40 chars. See 5.3 for the canonical lexicon. |
+
+**Response:** `201 Created`
+```json
+{
+  "invitation": {
+    "id": "inv_01J...",
+    "email": "sister@example.com",
+    "role": "editor",
+    "relationship": "sister",
+    "status": "pending",
+    "expiresAt": "2026-05-10T20:22:43Z",
+    "token": "abc123..."
+  }
+}
+```
+
+**Notes:**
+- Premium-only. Caps: 10 family members per cookbook (incl. pending), 20 invites/day, 100 invites/month per tenant.
+- An empty / whitespace-only `relationship` is silently coerced to null. Never blocks the invite.
+- `relationship` is persisted on `family_invitations.relationship` AND propagated to `users.relationship_to_inviter` on accept, so the value survives invite-row deletion.
+
+### 5.2 Get Family Tree
+
+Return the invite graph for the caller's tenant — the root user (cookbook owner) plus everyone they (and their invitees) have invited, with edges pointing from inviter to invitee.
+
+**Endpoint:** `GET /family/tree`
+
+**Response:** `200 OK`
+```json
+{
+  "rootUserId": "usr_andy",
+  "tenantName": "The Rockwell Family Cookbook",
+  "nodes": [
+    {
+      "userId": "usr_andy",
+      "name": "Andy",
+      "email": "andy@example.com",
+      "role": "owner",
+      "joinedAt": "2026-01-01T00:00:00Z",
+      "invitedBy": null,
+      "relationshipToInviter": null
+    },
+    {
+      "userId": "usr_maggie",
+      "name": "Maggie",
+      "email": "maggie@example.com",
+      "role": "editor",
+      "joinedAt": "2026-05-03T20:22:43Z",
+      "invitedBy": "usr_andy",
+      "relationshipToInviter": "sister"
+    },
+    {
+      "userId": "usr_legacy",
+      "name": "Cousin Pat",
+      "email": "pat@example.com",
+      "role": "viewer",
+      "joinedAt": "2026-02-01T00:00:00Z",
+      "invitedBy": "usr_andy",
+      "relationshipToInviter": null
+    }
+  ]
+}
+```
+
+**Field guide:**
+
+| Field | Type | Description |
+|---|---|---|
+| `userId` | string | Stable user identifier |
+| `name` | string | Display name |
+| `email` | string | Member's email |
+| `role` | enum | `owner` \| `admin` \| `editor` \| `viewer` \| `member` |
+| `joinedAt` | ISO 8601 \| null | When the user joined the tenant |
+| `invitedBy` | string \| null | `userId` of the inviter. Always null for the root node. |
+| `relationshipToInviter` | string \| null | Relationship the inviter declared at invite time. Null for the root, and null for legacy users who joined before relationship capture (added 2026-05-03). |
+
+**Important:** `relationshipToInviter` is OPTIONAL metadata and MAY be null on any non-root node (legacy users predating the field, or invites where the inviter declined to specify). Agents MUST handle null gracefully — never render "as null" or fabricate a relationship.
+
+### 5.3 Relationship Lexicon
+
+The `relationship` field uses a soft canonical lexicon — common values are lowercased English nouns the consumer UI offers as a picklist. Free text is also accepted and stored verbatim (trimmed, length-capped at 40 chars):
+
+**Family:**
+`sister`, `brother`, `parent`, `child` (also `son`, `daughter`), `spouse`, `grandparent`, `grandchild`
+
+**Extended family:**
+`aunt`, `uncle`, `niece`, `nephew`, `cousin`, `in-law`
+
+**Other:**
+`friend`, or any free-text value up to 40 chars (e.g. `step-mom`, `partner`, `roommate`, `chosen family`).
+
+**Wire conventions:**
+- Picklist values: lowercased label of the option (`sister`, not `Sister`).
+- Free-text: send the raw user-entered string trimmed; backend caps at 40 chars and stores verbatim.
+- Empty / whitespace-only / non-string is silently coerced to null.
+
+**Schema parity note:** This field was added 2026-05-03 (consumer release, migration 026). API responses to older clients will omit it cleanly; SDK consumers reading older responses will see null where the field is missing. The change is non-breaking and additive.
+
+## 6. Authentication
 
 The OFR Protocol supports two authentication methods.
 
-### 5.1 API Key
+### 6.1 API Key
 
 For server-to-server and MCP integrations.
 
@@ -439,7 +561,7 @@ X-API-Key: ofr_abc123def456...
 
 API keys are generated at `https://oldfamilyrecipe.com/settings/developer`. Keys are prefixed with `ofr_` for identification. The MCP server also accepts the same key in the `Authorization: Bearer ofr_...` header.
 
-### 5.2 JWT Bearer Token
+### 6.2 JWT Bearer Token
 
 For browser-based and mobile applications.
 
@@ -449,18 +571,18 @@ Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
 
 JWTs are issued by the OFR authentication service (backed by AWS Cognito). Tokens include the user's `cookbook_id` and plan tier in their claims.
 
-### 5.3 Authentication Errors
+### 6.3 Authentication Errors
 
 | Status | Meaning |
 |---|---|
 | `401 Unauthorized` | Missing or invalid credentials |
 | `403 Forbidden` | Valid credentials but insufficient permissions or plan limits exceeded |
 
-## 6. Agent Guidelines
+## 7. Agent Guidelines
 
 AI agents integrating with the OFR Protocol MUST follow these guidelines.
 
-### 6.1 Always Include Provenance
+### 7.1 Always Include Provenance
 
 When creating a recipe on behalf of a user, agents SHOULD always ask:
 
@@ -470,7 +592,7 @@ When creating a recipe on behalf of a user, agents SHOULD always ask:
 
 If the user does not know or does not want to provide provenance, the agent should still create the recipe — but should never silently skip the question.
 
-### 6.2 Identify with agent_id
+### 7.2 Identify with agent_id
 
 Agents MUST include their `agent_id` when creating or modifying recipes. This provides an audit trail of which agent performed which action.
 
@@ -480,7 +602,7 @@ Agents MUST include their `agent_id` when creating or modifying recipes. This pr
 }
 ```
 
-### 6.3 Respect Plan Limits
+### 7.3 Respect Plan Limits
 
 Agents MUST handle `403 Forbidden` responses gracefully when a user's plan quota is exceeded. The response body will include the limit that was hit:
 
@@ -495,11 +617,11 @@ Agents MUST handle `403 Forbidden` responses gracefully when a user's plan quota
 }
 ```
 
-### 6.4 Preserve Original Text
+### 7.4 Preserve Original Text
 
 When importing from handwritten cards or dictation, agents SHOULD preserve the original voice and phrasing of the recipe (e.g., "a good handful of flour" rather than normalizing to "0.5 cups flour"). Family recipes are not clinical documents.
 
-### 6.5 Do Not Hallucinate Recipes
+### 7.5 Do Not Hallucinate Recipes
 
 Agents MUST NOT invent provenance. If a recipe was generated by AI (not from a family member), the agent should set `source_person` to `null` and indicate AI generation in metadata:
 
@@ -513,17 +635,17 @@ Agents MUST NOT invent provenance. If a recipe was generated by AI (not from a f
 }
 ```
 
-## 7. Provenance
+## 8. Provenance
 
 Provenance is the philosophical core of the Old Family Recipe Protocol. It is what separates OFR from every other recipe API.
 
-### 7.1 Why Provenance Is First-Class
+### 8.1 Why Provenance Is First-Class
 
 Every recipe has a story. "Mama's stuffing" is not just cornbread and celery — it is Thanksgiving 1987, the kitchen in the old house, the way she hummed while she cooked. Generic recipe platforms treat this context as disposable. OFR treats it as the point.
 
 The `provenance` object exists at the top level of every recipe — not buried in metadata, not an optional extension. It is architecturally impossible to create a recipe without the system acknowledging that provenance *exists*, even if the user chooses not to fill it in.
 
-### 7.2 Provenance Chain
+### 8.2 Provenance Chain
 
 Recipes evolve. A daughter modifies her mother's cornbread recipe. The OFR Protocol supports provenance chains through the `contributed_by` field and recipe versioning:
 
@@ -531,11 +653,11 @@ Recipes evolve. A daughter modifies her mother's cornbread recipe. The OFR Proto
 - A fork of the recipe retains the original `source_person` but adds its own `story` explaining the modification.
 - The `metadata.forked_from` field links back to the parent recipe.
 
-### 7.3 Handwritten Card Preservation
+### 8.3 Handwritten Card Preservation
 
 When a recipe is imported from a photo of a handwritten card, the `original_image_url` field preserves the original artifact. This is not a convenience feature — it is an archival function. Handwritten cards are irreplaceable primary sources.
 
-## 8. MCP Server
+## 9. MCP Server
 
 The OFR Protocol is available as a Model Context Protocol (MCP) server for integration with AI assistants.
 
@@ -556,9 +678,9 @@ The OFR Protocol is available as a Model Context Protocol (MCP) server for integ
 }
 ```
 
-### 8.1 Available Tools
+### 9.1 Available Tools
 
-The MCP server exposes 13 tools covering the full REST surface.
+The MCP server exposes 13 tools covering the full REST surface (plus `shopping_list`, reserved for future use — see note below).
 
 **Recipes:**
 
@@ -591,9 +713,10 @@ The MCP server exposes 13 tools covering the full REST surface.
 | Tool | Description |
 |---|---|
 | `image_upload` | Get a presigned URL to upload an image (recipe photo, card scan) |
-| `family_invite` | Invite a family member to a shared cookbook |
+| `family_invite` | Invite a family member to a shared cookbook (with optional `relationship` — see section 5) |
+| `family_tree` | Read the invite graph for the caller's tenant, including each member's `relationshipToInviter` |
 
-### 8.2 Environment Variables
+### 9.2 Environment Variables
 
 | Variable | Required | Description |
 |---|---|---|
@@ -602,15 +725,15 @@ The MCP server exposes 13 tools covering the full REST surface.
 
 > Image OCR (`recipe_import_image`) runs server-side via the OFR backend — no Anthropic key needed on the client. The OFR account pays for Vision; usage counts against the user's monthly Sage quota.
 
-## 9. Security Considerations
+## 10. Security Considerations
 
-### 9.1 Authentication
+### 10.1 Authentication
 
 - All API requests MUST be authenticated via API key or JWT.
 - API keys MUST be transmitted over HTTPS only. Keys sent over HTTP MUST be rejected.
 - API keys are scoped to a single user's cookbook. Cross-user access is not possible.
 
-### 9.2 Rate Limits
+### 10.2 Rate Limits
 
 Rate limits are enforced per API key and vary by plan tier.
 
@@ -628,23 +751,23 @@ X-RateLimit-Remaining: 28
 X-RateLimit-Reset: 1713200000
 ```
 
-### 9.3 Plan-Based Quotas
+### 10.3 Plan-Based Quotas
 
-When a quota is exceeded, the API returns `403 Forbidden` with a structured error body (see section 6.3).
+When a quota is exceeded, the API returns `403 Forbidden` with a structured error body (see section 7.3).
 
-### 9.4 Image Handling
+### 10.4 Image Handling
 
 - Uploaded images are stored in private S3 buckets, accessible only to the recipe owner.
 - Image URLs are signed and time-limited for sharing.
 - Original handwritten card images are retained indefinitely as archival records.
 
-### 9.5 Data Privacy
+### 10.5 Data Privacy
 
 - Recipe data belongs to the user. OFR does not use recipe content for model training.
 - Users can export all their data at any time (see section 3.7).
 - Account deletion removes all recipes, images, and Sage conversation history.
 
-### 9.6 Agent Security
+### 10.6 Agent Security
 
 - Agents authenticate using the user's API key. Agents do not have independent credentials.
 - All agent actions are logged with the `agent_id` for audit purposes.

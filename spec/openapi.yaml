@@ -66,7 +66,7 @@ tags:
   - name: Meal plans
     description: Per-week meal plan persistence.
   - name: Family
-    description: Family sharing invites (Premium).
+    description: Family sharing invites + family tree (Premium for invite; tree is read-only and available to all members of the tenant).
   - name: Uploads
     description: Presigned S3 URLs for direct image upload from the client.
   - name: Account
@@ -569,9 +569,23 @@ paths:
                 role:
                   type: string
                   enum: [editor, viewer]
+                relationship:
+                  type: string
+                  maxLength: 40
+                  nullable: true
+                  description: |
+                    Optional relationship of the invitee to the inviter
+                    (e.g. `sister`, `spouse`, `cousin`, or free text up to
+                    40 chars). Captured at invite time, persisted on the
+                    invitation row, and propagated to
+                    `users.relationship_to_inviter` on accept so it
+                    surfaces on the family tree. Empty / whitespace-only /
+                    missing is silently coerced to null. Never blocks
+                    invite send. Added 2026-05-03 (migration 026).
             example:
               email: "sister@example.com"
               role: "editor"
+              relationship: "sister"
       responses:
         "201":
           description: Invitation created and email queued.
@@ -588,6 +602,11 @@ paths:
                       id: { type: string, format: uuid }
                       email: { type: string, format: email }
                       role: { type: string, enum: [editor, viewer] }
+                      relationship:
+                        type: string
+                        maxLength: 40
+                        nullable: true
+                        description: Relationship-to-inviter as supplied on the request (or null if omitted / empty).
                       status: { type: string, enum: [pending] }
                       expiresAt: { type: string, format: date-time }
                       token:
@@ -612,6 +631,47 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  /family/tree:
+    get:
+      tags: [Family]
+      summary: Get the family tree (invite graph) for the caller's tenant
+      operationId: getFamilyTree
+      description: |
+        Returns the invite graph for the caller's tenant — root user (cookbook
+        owner) plus everyone they (and their invitees) have invited. Each node
+        carries the inviter user-id (`invitedBy`) and the optional relationship
+        the inviter declared at invite time (`relationshipToInviter`).
+
+        `relationshipToInviter` is null for the root node and for legacy users
+        who joined before relationship capture (added 2026-05-03, migration
+        026). Clients MUST handle null gracefully.
+      responses:
+        "200":
+          description: Family tree payload.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rootUserId, tenantName, nodes]
+                properties:
+                  rootUserId:
+                    type: string
+                    nullable: true
+                    description: User-id of the root node (the tenant owner). Null only if the tenant has zero members.
+                  tenantName:
+                    type: string
+                    description: Display name of the tenant (cookbook).
+                  nodes:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/FamilyTreeNode"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/ServerError"
 
@@ -1087,6 +1147,51 @@ components:
       additionalProperties:
         type: object
         additionalProperties: { $ref: "#/components/schemas/MealSlot" }
+
+    FamilyTreeNode:
+      type: object
+      required: [userId, name, email, role, joinedAt, invitedBy, relationshipToInviter]
+      description: |
+        One member of the caller's family/tenant, with the user-id of who
+        invited them and the optional relationship the inviter declared at
+        invite time. Mirrors `FamilyTreeNode` in
+        `infrastructure/src/lambdas/recipes/family-handlers.ts`.
+      properties:
+        userId:
+          type: string
+          description: Stable user identifier.
+        name:
+          type: string
+          description: Display name (or username derived from email if no name set).
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [owner, admin, editor, viewer, member]
+        joinedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the user joined the tenant (created_at).
+        invitedBy:
+          type: string
+          nullable: true
+          description: |
+            `userId` of the inviter. Always null for the root node (tenant
+            owner). For non-root members, the backend re-parents orphaned
+            users (no accepted invitation row found) under the root so the
+            tree stays connected.
+        relationshipToInviter:
+          type: string
+          maxLength: 40
+          nullable: true
+          description: |
+            Relationship the inviter declared at invite time (e.g.
+            `sister`, `cousin`, or free text). Null for the root node and
+            for legacy users who joined before relationship capture
+            (added 2026-05-03, migration 026). Clients MUST handle null
+            gracefully.
 
     ApiKeySummary:
       type: object

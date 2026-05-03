@@ -20,6 +20,7 @@ This repo is the developer-facing home of:
 
 - 🧰 **[`@oldfamilyrecipe/mcp-server`](./mcp-server)** — Model Context Protocol server for Claude, Cursor, ChatGPT, and any MCP-compatible client
 - 📜 **[Recipe Protocol spec](./spec)** — the protocol specification
+- 📘 **[OpenAPI 3.1 spec](./spec/openapi.yaml)** — machine-readable contract for the public HTTP API (`api.oldfamilyrecipe.com`); covers recipes, Sage chat, image OCR import, meal plans, family invites, uploads, and API key management
 
 The rendered developer site at **[oldfamilyrecipe.ai](https://oldfamilyrecipe.ai)** lives in a separate repo (private — marketing/infra surface).
 

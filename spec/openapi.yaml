@@ -1,0 +1,1114 @@
+openapi: 3.1.0
+info:
+  title: Old Family Recipe API
+  version: "1.0.0"
+  summary: Public HTTP API for OldFamilyRecipe.com — recipes, Sage AI, meal plans, family sharing.
+  description: |
+    The Old Family Recipe HTTP API powers the web app, the MCP server
+    (`@oldfamilyrecipe/mcp-server`), and any third-party client a developer
+    wires up against `https://api.oldfamilyrecipe.com`.
+
+    This spec covers the endpoints exposed via the **hybrid authorizer**
+    (Cognito JWT **or** API key — used by every MCP-callable route) plus the
+    Cognito-only `/account/api-keys` flow developers use to mint keys.
+
+    ## Auth
+
+    Two security schemes:
+
+    - `bearerCognito` — Cognito user-pool JWT in the `Authorization` header.
+      Used by the web app via Amplify.
+    - `apiKey` — issued from `/account/api-keys`, prefix `ofr_`. Sent as
+      `Authorization: Bearer ofr_...`. Used by MCP clients and SDKs.
+
+    The hybrid authorizer accepts either. The `/account/api-keys` and
+    `/user/profile` routes accept **only** `bearerCognito` — you can't mint
+    or rotate keys with a key.
+
+    ## Quotas, rate limits, and errors
+
+    Sage chat and image OCR are metered against a shared monthly quota
+    (250/mo on Free, 2500/mo on Premium). Per-key sliding-window rate limits
+    apply on top (e.g. recipe import-image is 50/hr, 500/day on Free). Both
+    return **429** with a JSON `{ error, message, quota? }` body.
+
+    Standard error shape across all routes:
+
+    ```json
+    { "error": "<short code>", "message": "<human-readable message>" }
+    ```
+
+    ## What's NOT in this spec
+
+    - Internal admin routes (`/admin/*`)
+    - Stripe webhooks (`/webhooks/*`)
+    - Deprecated v0 paths
+    - The Wirable activity ingestion bus
+
+    Coverage is roughly 80% of the public surface. PRs welcome.
+  contact:
+    name: Old Family Recipe Developers
+    url: https://oldfamilyrecipe.ai
+    email: dev@oldfamilyrecipe.com
+  license:
+    name: MIT (spec only — service is proprietary)
+    url: https://github.com/OldFamilyRecipe/ai/blob/main/LICENSE
+
+servers:
+  - url: https://api.oldfamilyrecipe.com
+    description: Production
+
+tags:
+  - name: Recipes
+    description: Recipe CRUD, search, and image OCR import.
+  - name: Sage
+    description: Sage AI cooking companion (chat).
+  - name: Meal plans
+    description: Per-week meal plan persistence.
+  - name: Family
+    description: Family sharing invites (Premium).
+  - name: Uploads
+    description: Presigned S3 URLs for direct image upload from the client.
+  - name: Account
+    description: API key management and user profile.
+
+security:
+  - bearerCognito: []
+  - apiKey: []
+
+paths:
+  # ---------------------------------------------------------------------------
+  # Recipes
+  # ---------------------------------------------------------------------------
+  /recipes:
+    post:
+      tags: [Recipes]
+      summary: Create a recipe
+      operationId: createRecipe
+      description: |
+        Create a new recipe under the authenticated user's cookbook. Requires
+        title, at least one ingredient, and at least one instruction. Source
+        person + story + origin year are optional but encouraged — they're
+        the provenance fields that make the cookbook a heirloom rather than
+        a recipe dump.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRecipeRequest"
+            examples:
+              minimal:
+                summary: Minimum viable recipe
+                value:
+                  title: "Mom's Cornbread"
+                  ingredients:
+                    - { name: "cornmeal", amount: "1", unit: "cup" }
+                    - { name: "buttermilk", amount: "1", unit: "cup" }
+                  instructions:
+                    - "Mix dry ingredients."
+                    - "Add buttermilk, stir until just combined."
+                    - "Bake at 425F for 20 minutes."
+              with_provenance:
+                summary: Heirloom recipe with provenance
+                value:
+                  title: "Grandma Ruth's Sunday Stuffing"
+                  servings: 8
+                  ingredients:
+                    - { name: "stale white bread", amount: "1", unit: "loaf" }
+                    - { name: "sage", amount: "2", unit: "tbsp" }
+                  instructions:
+                    - "Cube bread the night before."
+                    - "Toss with sage, butter, broth."
+                    - "Bake covered 45 min, uncovered 15."
+                  source_person: "Ruth Calloway"
+                  story: "Made every Thanksgiving from 1962 until she passed in 2014."
+                  origin_year: "1962"
+                  cuisine: "Southern"
+                  tags: ["thanksgiving", "side"]
+      responses:
+        "201":
+          description: Recipe created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Recipe"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Free-plan recipe limit reached (only enforced if `RECIPE_FREE_LIMIT` is set; default is unlimited).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+    get:
+      tags: [Recipes]
+      summary: List or search recipes
+      operationId: listRecipes
+      description: |
+        List recipes in the authenticated user's cookbook. Supports keyword
+        search via `?search=` (matches title or description LIKE), and filter
+        by category, cuisine, or `is_public`.
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: search
+          in: query
+          description: Keyword search across title and description.
+          schema: { type: string }
+        - name: q
+          in: query
+          description: Alias for `search`.
+          schema: { type: string }
+        - name: category
+          in: query
+          schema: { type: string }
+        - name: cuisine
+          in: query
+          schema: { type: string }
+        - name: public
+          in: query
+          description: Filter by public/private status.
+          schema: { type: string, enum: ["true", "false"] }
+      responses:
+        "200":
+          description: Paginated list of recipes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [recipes, total, page, limit, totalPages]
+                properties:
+                  recipes:
+                    type: array
+                    items: { $ref: "#/components/schemas/RecipeListItem" }
+                  total: { type: integer }
+                  page: { type: integer }
+                  limit: { type: integer }
+                  totalPages: { type: integer }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  /recipes/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+        description: Recipe ID.
+    get:
+      tags: [Recipes]
+      summary: Get a recipe
+      operationId: getRecipe
+      responses:
+        "200":
+          description: Recipe found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Recipe" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+    put:
+      tags: [Recipes]
+      summary: Update a recipe
+      operationId: updateRecipe
+      description: |
+        Partial update — send only the fields you want to change. Empty body
+        is rejected. Owner-only; non-owners get 404 (not 403, to avoid
+        leaking existence).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateRecipeRequest" }
+      responses:
+        "200":
+          description: Recipe updated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Recipe" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+    delete:
+      tags: [Recipes]
+      summary: Delete a recipe
+      operationId: deleteRecipe
+      description: Soft delete (sets `deleted_at`). Owner-only.
+      responses:
+        "200":
+          description: Recipe deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message, id]
+                properties:
+                  message: { type: string, example: "Recipe deleted successfully" }
+                  id: { type: string, format: uuid }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  /recipes/import-image:
+    post:
+      tags: [Recipes]
+      summary: Import a recipe from a photo (Vision OCR)
+      operationId: importRecipeImage
+      description: |
+        OCR a photo (or set of 1–4 photos) of a handwritten or printed recipe
+        card into a structured recipe and save it under the authenticated
+        user's cookbook.
+
+        Multi-card imports send all images as a single Vision request — use
+        for front/back, continuation cards, or a variation card. The model
+        merges them into ONE recipe, preserving instruction order and
+        deduplicating ingredients.
+
+        **Quota:** charged at 5 Sage actions per card (e.g. a 3-card import
+        uses 15 of your monthly Sage quota). Rate-limited to 50/hour and
+        500/day per API key on Free.
+
+        **Image hardening:** every upload is re-encoded to JPEG and EXIF is
+        stripped (GPS leak fix) before Vision sees it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                image_base64s:
+                  type: array
+                  description: 1–4 base64-encoded images representing the SAME recipe.
+                  items: { type: string }
+                  minItems: 1
+                  maxItems: 4
+                image_base64:
+                  type: string
+                  description: Legacy single-image field. If both are sent, `image_base64s` wins.
+                  deprecated: true
+                media_type:
+                  type: string
+                  enum: [image/jpeg, image/png, image/webp, image/gif]
+                  default: image/jpeg
+                source_person:
+                  type: string
+                  description: Provenance — who's recipe is this?
+                story:
+                  type: string
+                  description: Provenance — the story behind the recipe.
+                origin_year:
+                  type: string
+                  example: "1962"
+              oneOf:
+                - required: [image_base64s]
+                - required: [image_base64]
+            example:
+              image_base64s: ["/9j/4AAQSkZJRgABAQEA..."]
+              media_type: "image/jpeg"
+              source_person: "Aunt Mary"
+              story: "From the back of her recipe box, undated."
+      responses:
+        "201":
+          description: Recipe created from OCR'd image(s).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Recipe" }
+        "400":
+          description: Bad request — missing image, invalid format, or too many cards.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          description: One image exceeds the ~5MB per-card limit.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429":
+          description: Sage quota exceeded OR per-API-key rate limit hit.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  # ---------------------------------------------------------------------------
+  # Sage
+  # ---------------------------------------------------------------------------
+  /sage/chat:
+    post:
+      tags: [Sage]
+      summary: Chat with Sage, the AI cooking companion
+      operationId: sageChat
+      description: |
+        Sage is the AI cooking companion that knows your family's recipes.
+        Anonymous browser sessions are allowed (no auth header required) and
+        rate-limited per source IP at 500 messages/month. Authenticated calls
+        (JWT or API key) draw from the per-tenant monthly Sage quota.
+
+        **MCP guard:** any request presenting an `ofr_` token MUST resolve to
+        a real user — bogus or malformed `ofr_` tokens get **401**, not the
+        anonymous fallback. This prevents one bad MCP relay from collapsing
+        every legitimate caller into a single shared anonymous bucket.
+      security:
+        - bearerCognito: []
+        - apiKey: []
+        - {}  # anonymous allowed
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message:
+                  type: string
+                  maxLength: 4000
+                  description: User's message to Sage.
+                conversation_history:
+                  type: array
+                  description: Prior turns for context. Trimmed server-side.
+                  items:
+                    type: object
+                    required: [role, content]
+                    properties:
+                      role:
+                        type: string
+                        enum: [user, assistant]
+                      content:
+                        type: string
+                mode:
+                  type: string
+                  enum: ["", recipe-builder, polish, meal-planner, generate-recipe]
+                  default: ""
+                  description: Conversational mode. Empty string = freeform.
+                field_type:
+                  type: string
+                  description: Optional hint for `polish`/`recipe-builder` modes (e.g. "story").
+                meal_context:
+                  type: object
+                  description: Optional context when called from meal planner.
+                  properties:
+                    day: { type: string }
+                    meal_type: { type: string }
+                    week_id: { type: string }
+            example:
+              message: "What can I make tonight with chicken thighs and lemon?"
+      responses:
+        "200":
+          description: Sage's reply.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message, model, domain, quota]
+                properties:
+                  message:
+                    type: string
+                    description: Sage's response text.
+                  model:
+                    type: string
+                    description: Anthropic model name that handled the turn.
+                  domain:
+                    type: string
+                    enum: [cooking, app, off_topic]
+                  quota:
+                    $ref: "#/components/schemas/Quota"
+                  recipe:
+                    $ref: "#/components/schemas/SageRecipe"
+                  usage: { type: object }
+                  meta:
+                    type: object
+                    properties:
+                      appScore: { type: number }
+                      cookingScore: { type: number }
+                      offtopicScore: { type: number }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: MCP-style request without a valid API key.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429":
+          description: Sage monthly quota exceeded.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    properties:
+                      quota: { $ref: "#/components/schemas/Quota" }
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  # ---------------------------------------------------------------------------
+  # Uploads
+  # ---------------------------------------------------------------------------
+  /upload/presigned-url:
+    post:
+      tags: [Uploads]
+      summary: Get a presigned S3 URL for direct image upload
+      operationId: getPresignedUploadUrl
+      description: |
+        Returns a 5-minute presigned PUT URL the client can use to upload an
+        image directly to the OFR images bucket. Use the returned `url` as
+        the recipe's `image_url` once the upload completes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fileName, contentType, fileSize]
+              properties:
+                fileName:
+                  type: string
+                  description: Original filename (sanitized server-side).
+                contentType:
+                  type: string
+                  enum: [image/jpeg, image/jpg, image/png, image/gif, image/webp]
+                fileSize:
+                  type: integer
+                  description: File size in bytes; must be positive and within the 10MB ceiling.
+            example:
+              fileName: "stuffing-card.jpg"
+              contentType: "image/jpeg"
+              fileSize: 1843201
+      responses:
+        "200":
+          description: Presigned URL issued.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [presignedUrl, fileKey, url, expiresIn]
+                properties:
+                  presignedUrl:
+                    type: string
+                    format: uri
+                    description: Client PUTs the image bytes to this URL with the matching `Content-Type`.
+                  fileKey:
+                    type: string
+                    description: S3 key of the eventual object.
+                  url:
+                    type: string
+                    format: uri
+                    description: Public CDN URL — store this on the recipe.
+                  expiresIn:
+                    type: integer
+                    description: TTL of the presigned URL in seconds.
+                    example: 300
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  # ---------------------------------------------------------------------------
+  # Family
+  # ---------------------------------------------------------------------------
+  /family/invite:
+    post:
+      tags: [Family]
+      summary: Invite a family member to the cookbook
+      operationId: inviteFamilyMember
+      description: |
+        Invite an email to join the authenticated user's cookbook. Premium
+        only. Owner only. Hard caps:
+
+        - 10 family members per cookbook (incl. pending invitations)
+        - 20 invites/day, 100 invites/month per tenant
+        - Per-key burst rate limit (10/day, 100/month on Free)
+
+        Sends an SES email with a tokenized accept link.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role]
+              properties:
+                email:
+                  type: string
+                  format: email
+                role:
+                  type: string
+                  enum: [editor, viewer]
+            example:
+              email: "sister@example.com"
+              role: "editor"
+      responses:
+        "201":
+          description: Invitation created and email queued.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [invitation]
+                properties:
+                  invitation:
+                    type: object
+                    required: [id, email, role, status, expiresAt, token]
+                    properties:
+                      id: { type: string, format: uuid }
+                      email: { type: string, format: email }
+                      role: { type: string, enum: [editor, viewer] }
+                      status: { type: string, enum: [pending] }
+                      expiresAt: { type: string, format: date-time }
+                      token:
+                        type: string
+                        description: 64-char hex accept token. Echoed for the inviter UI; also emailed to the invitee.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Not Premium, or not the cookbook owner.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Already a member, already invited, or member limit reached.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429":
+          description: Daily/monthly invite cap or per-key rate limit.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  # ---------------------------------------------------------------------------
+  # Meal plans
+  # ---------------------------------------------------------------------------
+  /meal-plans:
+    get:
+      tags: [Meal plans]
+      summary: Get all saved meal plans for the user's cookbook
+      operationId: getMealPlans
+      description: |
+        Returns every saved week keyed by `week_id` (typically an ISO week
+        like `2026-W18`). Each week's value is a record of slot keys (e.g.
+        `mon-dinner`) to `{ day, type, recipeId? }`.
+      responses:
+        "200":
+          description: Meal plans payload.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [mealPlans]
+                properties:
+                  mealPlans:
+                    $ref: "#/components/schemas/MealPlansPayload"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+    put:
+      tags: [Meal plans]
+      summary: Replace meal plan weeks (idempotent upsert per week)
+      operationId: updateMealPlans
+      description: |
+        REPLACE semantics per week — sending a key in `mealPlans` overwrites
+        that week's slots in full. Weeks not included are left alone. Body
+        is capped at ~256KB; rejected if larger.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mealPlans]
+              properties:
+                mealPlans:
+                  $ref: "#/components/schemas/MealPlansPayload"
+            example:
+              mealPlans:
+                "2026-W18":
+                  "mon-dinner":
+                    day: 1
+                    type: "dinner"
+                    recipeId: "9b7e1f6a-..."
+                  "tue-dinner":
+                    day: 2
+                    type: "dinner"
+      responses:
+        "200":
+          description: Saved.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, updated]
+                properties:
+                  ok: { type: boolean, example: true }
+                  updated:
+                    type: array
+                    items: { type: string }
+                    description: List of `week_id`s that were upserted.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  # ---------------------------------------------------------------------------
+  # Account: API keys (Cognito JWT only)
+  # ---------------------------------------------------------------------------
+  /account/api-keys:
+    get:
+      tags: [Account]
+      summary: List the caller's active API keys
+      operationId: listApiKeys
+      security:
+        - bearerCognito: []
+      responses:
+        "200":
+          description: Active (non-revoked) keys, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [keys]
+                properties:
+                  keys:
+                    type: array
+                    items: { $ref: "#/components/schemas/ApiKeySummary" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+    post:
+      tags: [Account]
+      summary: Mint a new API key
+      operationId: createApiKey
+      description: |
+        Returns the **full key** exactly once. Store it immediately; OFR only
+        keeps a hash. Max 20 active keys per user — revoke an old one before
+        creating another if you've hit the cap.
+      security:
+        - bearerCognito: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  maxLength: 100
+                  description: Human label for the key (e.g. "Claude Desktop", "ci-prod").
+            example:
+              name: "Claude Desktop"
+      responses:
+        "201":
+          description: Key created. The `key` field is the only place the full secret is ever returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, name, key_prefix, key, created_at]
+                properties:
+                  id: { type: string, format: uuid }
+                  name: { type: string }
+                  key_prefix:
+                    type: string
+                    description: "Public prefix used in `Authorization: Bearer <prefix>...`. Always starts with `ofr_`."
+                  key:
+                    type: string
+                    description: Full API key. Returned ONCE — never retrievable again.
+                  created_at: { type: string, format: date-time }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  /account/api-keys/{keyId}:
+    parameters:
+      - name: keyId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      tags: [Account]
+      summary: Revoke an API key
+      operationId: revokeApiKey
+      security:
+        - bearerCognito: []
+      responses:
+        "200":
+          description: Key revoked.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revoked]
+                properties:
+                  revoked: { type: boolean, example: true }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Key not found, not yours, or already revoked.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  # ---------------------------------------------------------------------------
+  # User profile (Cognito JWT only)
+  # ---------------------------------------------------------------------------
+  /user/profile:
+    get:
+      tags: [Account]
+      summary: Get the caller's profile
+      operationId: getUserProfile
+      security:
+        - bearerCognito: []
+      responses:
+        "200":
+          description: Profile.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserProfile" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Profile row not found (signup flow not yet completed).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+components:
+  securitySchemes:
+    bearerCognito:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Amazon Cognito user-pool ID token. The web app populates this via
+        AWS Amplify; SDKs/MCP clients should not use this scheme — use
+        `apiKey` instead.
+    apiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: ofr_*
+      description: |
+        Long-lived API key minted at `/account/api-keys`. Send as
+        `Authorization: Bearer ofr_<rest-of-key>`. Used by the MCP server
+        and any third-party SDK.
+
+  responses:
+    BadRequest:
+      description: Validation error.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Missing or invalid auth.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Resource not found OR caller doesn't own it (we don't distinguish — prevents existence probing).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    RateLimited:
+      description: Per-key sliding-window rate limit OR monthly quota hit.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    ServerError:
+      description: Internal error.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Short code or human-readable message.
+        message:
+          type: string
+          description: Long-form human-readable message (when present).
+        code:
+          type: string
+          description: Stable machine-readable code (e.g. `INVITE_DAILY_LIMIT`, `SAGE_QUOTA_EXCEEDED`).
+
+    Quota:
+      type: object
+      description: Sage monthly quota state.
+      properties:
+        used: { type: integer }
+        limit: { type: integer }
+        remaining: { type: integer }
+        resetsAt: { type: string, format: date-time, nullable: true }
+
+    Ingredient:
+      type: object
+      properties:
+        name: { type: string }
+        amount: { type: string }
+        unit: { type: string }
+
+    RecipeImage:
+      type: object
+      required: [image_url]
+      properties:
+        image_url: { type: string, format: uri }
+        image_type:
+          type: string
+          enum: [hero, original, gallery]
+          description: "`original` = the heirloom card photo. `hero` = main display. `gallery` = additional shots."
+        caption: { type: string, nullable: true }
+        sort_order: { type: integer }
+
+    RecipeListItem:
+      type: object
+      description: Recipe shape returned by `GET /recipes` (list response — omits `story`, `original_image_url`, and the `images` array).
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        description: { type: string, nullable: true }
+        image_url: { type: string, format: uri, nullable: true }
+        ingredients:
+          type: array
+          items: { $ref: "#/components/schemas/Ingredient" }
+        instructions:
+          type: array
+          items: { type: string }
+        servings: { type: integer }
+        category: { type: string, nullable: true }
+        cuisine: { type: string, nullable: true }
+        tags:
+          type: array
+          items: { type: string }
+          nullable: true
+        prep_time_minutes: { type: integer, nullable: true }
+        cook_time_minutes: { type: integer, nullable: true }
+        difficulty:
+          type: string
+          enum: [easy, medium, hard]
+          nullable: true
+        is_public: { type: boolean }
+        status: { type: string, enum: [published, draft] }
+        source_person: { type: string, nullable: true }
+        origin_year: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Recipe:
+      description: Full recipe shape returned by `GET/POST/PUT /recipes/{id}` — adds story, `original_image_url`, and the `images` gallery.
+      allOf:
+        - $ref: "#/components/schemas/RecipeListItem"
+        - type: object
+          properties:
+            story:
+              type: string
+              nullable: true
+              description: Provenance — the story behind the recipe.
+            original_image_url:
+              type: string
+              format: uri
+              nullable: true
+              description: URL of the original handwritten/printed card photo.
+            images:
+              type: array
+              items: { $ref: "#/components/schemas/RecipeImage" }
+
+    CreateRecipeRequest:
+      type: object
+      required: [title, ingredients, instructions]
+      properties:
+        title:
+          type: string
+          maxLength: 200
+        description: { type: string, nullable: true }
+        image_url:
+          type: string
+          format: uri
+          nullable: true
+          description: Must be HTTPS — `data:` and `javascript:` schemes are rejected.
+        ingredients:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/Ingredient" }
+        instructions:
+          type: array
+          minItems: 1
+          items: { type: string }
+        servings: { type: integer, minimum: 1, default: 4 }
+        category: { type: string, nullable: true }
+        cuisine: { type: string, nullable: true }
+        tags:
+          type: array
+          items: { type: string }
+          nullable: true
+        prep_time_minutes: { type: integer, nullable: true }
+        cook_time_minutes: { type: integer, nullable: true }
+        difficulty:
+          type: string
+          enum: [easy, medium, hard]
+          nullable: true
+        is_public: { type: boolean, default: false }
+        source_person: { type: string, nullable: true, description: "Provenance — who's recipe is this?" }
+        story: { type: string, nullable: true, description: "Provenance — the story behind the recipe." }
+        origin_year: { type: string, nullable: true, example: "1962" }
+        original_image_url:
+          type: string
+          format: uri
+          nullable: true
+          description: URL of the heirloom card photo (HTTPS only).
+        images:
+          type: array
+          description: Optional gallery (Premium feature).
+          items: { $ref: "#/components/schemas/RecipeImage" }
+
+    UpdateRecipeRequest:
+      description: Partial update — every field optional. Send only what you want to change. Body must contain at least one field.
+      type: object
+      properties:
+        title: { type: string, maxLength: 200 }
+        description: { type: string, nullable: true }
+        image_url: { type: string, format: uri, nullable: true }
+        ingredients:
+          type: array
+          items: { $ref: "#/components/schemas/Ingredient" }
+        instructions:
+          type: array
+          items: { type: string }
+        servings: { type: integer, minimum: 1 }
+        category: { type: string, nullable: true }
+        cuisine: { type: string, nullable: true }
+        tags: { type: array, items: { type: string }, nullable: true }
+        prep_time_minutes: { type: integer, nullable: true }
+        cook_time_minutes: { type: integer, nullable: true }
+        difficulty: { type: string, enum: [easy, medium, hard], nullable: true }
+        is_public: { type: boolean }
+        source_person: { type: string, nullable: true }
+        story: { type: string, nullable: true }
+        origin_year: { type: string, nullable: true }
+        original_image_url: { type: string, format: uri, nullable: true }
+        images:
+          type: array
+          items: { $ref: "#/components/schemas/RecipeImage" }
+
+    SageRecipe:
+      type: object
+      description: Inline recipe Sage proposes mid-conversation. Render as a card; user can save with one click.
+      properties:
+        title: { type: string }
+        servings: { type: integer }
+        ingredients:
+          type: array
+          items: { $ref: "#/components/schemas/Ingredient" }
+        instructions:
+          type: array
+          items: { type: string }
+        notes: { type: string }
+
+    MealSlot:
+      type: object
+      required: [day, type]
+      properties:
+        day:
+          type: integer
+          minimum: 0
+          maximum: 6
+          description: Day of week (0=Sunday).
+        type:
+          type: string
+          enum: [breakfast, lunch, dinner, snack]
+        recipeId:
+          type: string
+          format: uuid
+          description: Recipe to cook in this slot. Omit to leave the slot empty (placeholder).
+
+    MealPlansPayload:
+      type: object
+      description: |
+        Map of `week_id` (e.g. `2026-W18`) → map of slot key (e.g. `mon-dinner`) → `MealSlot`.
+      additionalProperties:
+        type: object
+        additionalProperties: { $ref: "#/components/schemas/MealSlot" }
+
+    ApiKeySummary:
+      type: object
+      required: [id, name, key_prefix, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        key_prefix:
+          type: string
+          description: "Public prefix used in `Authorization: Bearer ofr_...`. The full secret is never returned after creation."
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time, nullable: true }
+        revoked_at: { type: string, format: date-time, nullable: true }
+
+    UserProfile:
+      type: object
+      required: [id, email]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, nullable: true }
+        email: { type: string, format: email }
+        familyName:
+          type: string
+          nullable: true
+          description: User-set family/cookbook name, e.g. "The Calloway Family Cookbook".

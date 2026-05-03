@@ -1,0 +1,56 @@
+{
+  "name": "@oldfamilyrecipe/mcp-server",
+  "version": "0.1.9",
+  "description": "MCP server for Old Family Recipe — save recipes from any AI assistant to your family cookbook",
+  "main": "dist/index.js",
+  "bin": {
+    "oldfamilyrecipe-mcp": "dist/index.js"
+  },
+  "type": "module",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch",
+    "test": "find src -name '*.test.ts' -print0 | xargs -0 tsx --test",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "recipe",
+    "cookbook",
+    "ai",
+    "claude",
+    "cursor",
+    "family-recipe",
+    "oldfamilyrecipe",
+    "recipe-protocol"
+  ],
+  "author": "Old Family Recipe <developers@oldfamilyrecipe.com>",
+  "license": "MIT",
+  "homepage": "https://oldfamilyrecipe.ai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OldFamilyRecipe/ai.git",
+    "directory": "mcp-server"
+  },
+  "bugs": {
+    "url": "https://github.com/OldFamilyRecipe/ai/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0"
+  }
+}

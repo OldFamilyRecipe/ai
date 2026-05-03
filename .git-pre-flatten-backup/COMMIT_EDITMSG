@@ -1,0 +1,40 @@
+fix(sage_meal_plan): convert Sage's emitted shapes into backend slot map (v0.1.9)
+
+The auto-save fix in v0.1.6 (#9) wired the right METHOD (POST→PUT) and
+ENVELOPE ({mealPlans:{<weekId>:slots}}), but it stuffed Sage's raw output
+straight into the slots field. Sage emits a different shape than the
+backend validator wants:
+
+  Sage emits:    {sunday: {breakfast: "Recipe Name"}}
+  Backend wants: {<slot-key>: {day:int, type:CapitalizedString, recipeId?}}
+
+Result: even after #9, every Sage auto-save still 400'd at the slot
+validator. Auto-save was effectively dead — invisible because the chat
+reply went through fine and the silent failure was wrapped in `if
+(saveResult.ok)`.
+
+Companion PR `solidphp/oldfamilyrecipe#<TBD>` updates Sage's prompt to
+emit the slot-keyed format directly. This PR makes the MCP tool tolerant
+of BOTH the new shape and the legacy day-name shape (transitional, also
+covers AI clients that improvise the format).
+
+New `sageMealPlanToSlots(raw, weekId)`:
+- Shape A (slot-keyed): pass through, normalize via existing
+  `normalizeMealPlans` so day-name strings + lowercase types still work
+- Shape B (day-name keyed): walk into each (day, meal-type, value) and
+  reshape. Only emit slots with a real recipeId (UUID match) — slots
+  without a recipeId would create empty backend rows, worse UX than
+  dropping them and prompting the user to use `meal_plan_update`
+
+When 0 slots survive conversion (Sage's plan was all new-recipe ideas
+or all free-text titles), the auto-save is skipped and a friendly
+message tells the user to use `meal_plan_update` manually. No more
+silently saving nothing.
+
+Tests: 6 new cases for `sageMealPlanToSlots` (Shape A passthrough,
+Shape B conversion, free-text drop, object-with-recipeId, empty result,
+nothing-matched user-facing message). 48/48 pass; tsc clean.
+
+Bumps to v0.1.9 — publish when convenient.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>

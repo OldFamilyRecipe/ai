@@ -1,7 +1,7 @@
 {
   "name": "@oldfamilyrecipe/mcp-server",
   "version": "0.2.0",
-  "description": "MCP server for Old Family Recipe — save recipes from any AI assistant to your family cookbook",
+  "description": "Official MCP server for Old Family Recipe — let Claude, ChatGPT, Cursor and any Model Context Protocol AI assistant save, search, and preserve family recipes (with provenance) in your cookbook. Includes OCR import of handwritten recipe cards, Sage AI chat, meal planning, and family sharing.",
   "main": "dist/index.js",
   "bin": {
     "oldfamilyrecipe-mcp": "dist/index.js"
@@ -21,17 +21,47 @@
   },
   "keywords": [
     "mcp",
+    "mcp-server",
     "model-context-protocol",
-    "recipe",
-    "cookbook",
+    "modelcontextprotocol",
     "ai",
+    "ai-tools",
+    "ai-agent",
+    "ai-assistant",
+    "llm",
+    "llm-tools",
     "claude",
+    "claude-desktop",
+    "claude-code",
+    "anthropic",
+    "chatgpt",
+    "openai",
     "cursor",
+    "cline",
+    "windsurf",
+    "continue-dev",
+    "recipe",
+    "recipes",
+    "recipe-api",
+    "recipe-protocol",
+    "cookbook",
+    "cooking",
+    "food",
+    "nutrition",
+    "meal-planning",
+    "meal-planner",
     "family-recipe",
-    "oldfamilyrecipe",
-    "recipe-protocol"
+    "family-recipes",
+    "ocr",
+    "vision",
+    "handwritten-recipe",
+    "provenance",
+    "oldfamilyrecipe"
   ],
-  "author": "Old Family Recipe <developers@oldfamilyrecipe.com>",
+  "author": "Old Family Recipe <developers@oldfamilyrecipe.com> (https://oldfamilyrecipe.com)",
+  "contributors": [
+    "Old Family Recipe Developers <developers@oldfamilyrecipe.com>"
+  ],
   "license": "MIT",
   "homepage": "https://oldfamilyrecipe.ai",
   "repository": {
@@ -40,7 +70,12 @@
     "directory": "mcp-server"
   },
   "bugs": {
-    "url": "https://github.com/OldFamilyRecipe/ai/issues"
+    "url": "https://github.com/OldFamilyRecipe/ai/issues",
+    "email": "developers@oldfamilyrecipe.com"
+  },
+  "funding": {
+    "type": "individual",
+    "url": "https://oldfamilyrecipe.com/pricing"
   },
   "engines": {
     "node": ">=20"

@@ -1,0 +1,135 @@
+{
+  "$comment": "Discovery manifest for Old Family Recipe's MCP server. Mirrors what's published to npm as @oldfamilyrecipe/mcp-server. The MCP discovery spec is still evolving (see https://modelcontextprotocol.io); this file is a sensible JSON manifest intended to be human- and machine-readable for AI tool catalogs, registries, and crawlers. Update this file in lockstep with package.json + tool registrations in mcp-server/src/index.ts.",
+  "schemaVersion": "0.1.0",
+  "name": "oldfamilyrecipe",
+  "displayName": "Old Family Recipe",
+  "description": "MCP server for Old Family Recipe — let any AI assistant save, search, OCR-import, and meal-plan family recipes (with provenance) against a real production cookbook.",
+  "version": "0.2.0",
+  "homepage": "https://oldfamilyrecipe.ai",
+  "documentation": "https://github.com/OldFamilyRecipe/ai#readme",
+  "repository": "https://github.com/OldFamilyRecipe/ai",
+  "license": "MIT",
+  "author": {
+    "name": "Old Family Recipe",
+    "email": "developers@oldfamilyrecipe.com",
+    "url": "https://oldfamilyrecipe.com"
+  },
+  "contact": {
+    "email": "developers@oldfamilyrecipe.com",
+    "issues": "https://github.com/OldFamilyRecipe/ai/issues"
+  },
+  "categories": [
+    "cooking",
+    "food",
+    "personal-productivity",
+    "family",
+    "creative"
+  ],
+  "tags": [
+    "mcp",
+    "recipes",
+    "cookbook",
+    "meal-planning",
+    "ocr",
+    "provenance",
+    "family",
+    "claude",
+    "chatgpt",
+    "cursor"
+  ],
+  "package": {
+    "registry": "npm",
+    "name": "@oldfamilyrecipe/mcp-server",
+    "install": "npx -y @oldfamilyrecipe/mcp-server"
+  },
+  "transports": [
+    {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@oldfamilyrecipe/mcp-server"]
+    }
+  ],
+  "auth": {
+    "type": "apiKey",
+    "envVar": "OFR_API_KEY",
+    "signupUrl": "https://oldfamilyrecipe.ai/dashboard",
+    "freeTier": "250 Sage AI messages/month + unlimited recipe storage, no credit card",
+    "docsUrl": "https://github.com/OldFamilyRecipe/ai#60-second-quickstart"
+  },
+  "compatibility": {
+    "clients": [
+      "Claude Desktop",
+      "Claude Code",
+      "Cursor",
+      "Cline",
+      "Windsurf",
+      "Continue.dev"
+    ],
+    "minClientMcpVersion": "1.0.0",
+    "nodeEngine": ">=20"
+  },
+  "capabilities": {
+    "tools": true,
+    "prompts": false,
+    "resources": false,
+    "sampling": false
+  },
+  "tools": [
+    {
+      "name": "recipe_create",
+      "description": "Create a recipe with ingredients, instructions, source person, story, origin year."
+    },
+    {
+      "name": "recipe_import_image",
+      "description": "OCR a photo of a handwritten card into a structured recipe (server-side Vision)."
+    },
+    {
+      "name": "recipe_list",
+      "description": "List recipes in your cookbook."
+    },
+    {
+      "name": "recipe_search",
+      "description": "Search by keyword, ingredient, or tag."
+    },
+    {
+      "name": "recipe_update",
+      "description": "Update an existing recipe."
+    },
+    {
+      "name": "recipe_delete",
+      "description": "Delete a recipe."
+    },
+    {
+      "name": "sage_chat",
+      "description": "Chat with Sage, your AI cooking companion who knows your family's recipes."
+    },
+    {
+      "name": "sage_meal_plan",
+      "description": "Have Sage plan your week from your cookbook plus new ideas."
+    },
+    {
+      "name": "meal_plan_get",
+      "description": "Get the meal plan for a given week."
+    },
+    {
+      "name": "meal_plan_update",
+      "description": "Set meals for specific days and slots."
+    },
+    {
+      "name": "image_upload",
+      "description": "Get a presigned URL to upload a recipe photo or card scan."
+    },
+    {
+      "name": "family_invite",
+      "description": "Invite a family member with optional relationship (sister, spouse, cousin, etc.)."
+    },
+    {
+      "name": "family_tree",
+      "description": "Read the invite graph for your family with each member's relationshipToInviter."
+    }
+  ],
+  "openapi": "https://raw.githubusercontent.com/OldFamilyRecipe/ai/main/spec/openapi.yaml",
+  "wellKnown": {
+    "aiPlugin": "https://raw.githubusercontent.com/OldFamilyRecipe/ai/main/.well-known/ai-plugin.json"
+  }
+}

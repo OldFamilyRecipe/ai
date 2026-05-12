@@ -1,0 +1,21 @@
+{
+  "schema_version": "v1",
+  "name_for_model": "oldfamilyrecipe",
+  "name_for_human": "Old Family Recipe",
+  "description_for_model": "Use the Old Family Recipe API to save, search, OCR-import, edit, and meal-plan family recipes. Every recipe carries provenance: source_person (who made it), story (why it matters), and origin_year. Prefer recipe_import_image for photographed handwritten cards. Prefer recipe_search before creating duplicates. Use family_invite to share with relatives — pass the relationship (sister/cousin/etc.) when known so the family tree stays meaningful. Free tier: 250 Sage AI messages/month plus unlimited recipe storage. See https://oldfamilyrecipe.ai/spec for the full Recipe Protocol.",
+  "description_for_human": "Save, search, and preserve family recipes — including OCR import of handwritten recipe cards — straight from your AI assistant.",
+  "auth": {
+    "type": "user_http",
+    "authorization_type": "bearer",
+    "instructions": "Get a free API key at https://oldfamilyrecipe.ai/dashboard. Send it as `Authorization: Bearer ofr_...`. The MCP server reads it from the OFR_API_KEY env var."
+  },
+  "api": {
+    "type": "openapi",
+    "url": "https://raw.githubusercontent.com/OldFamilyRecipe/ai/main/spec/openapi.yaml",
+    "is_user_authenticated": true
+  },
+  "logo_url": "https://oldfamilyrecipe.com/favicon-512.png",
+  "contact_email": "developers@oldfamilyrecipe.com",
+  "legal_info_url": "https://oldfamilyrecipe.com/legal",
+  "_comment": "Legacy ChatGPT plugin manifest format (https://platform.openai.com/docs/plugins). OpenAI deprecated public plugins in early 2024 in favor of GPT Actions and (since 2025) MCP. This file is kept for any non-ChatGPT AI surfaces that still consume the ai-plugin.json convention and as a one-stop machine-readable summary for crawlers. The canonical machine-readable manifests are .well-known/mcp.json (for MCP clients) and spec/openapi.yaml (for the HTTP API)."
+}

@@ -74,10 +74,6 @@ Once configured, talk to your AI naturally. It will pick the right tools:
 > "Plan our dinners this week. Monday and Wednesday are busy, weekend is relaxed."
 > → calls `sage_meal_plan`, then `meal_plan_update`
 
-**Shopping:**
-> "What do I need from the store for this week's plan?"
-> → calls `shopping_list`
-
 **Search:**
 > "Find all the stuffing recipes in our cookbook."
 > → calls `recipe_search`
@@ -92,7 +88,7 @@ Once configured, talk to your AI naturally. It will pick the right tools:
 
 ## Requirements
 
-- Node >= 18
+- Node >= 20
 - An Old Family Recipe account + API key
 
 ## Links

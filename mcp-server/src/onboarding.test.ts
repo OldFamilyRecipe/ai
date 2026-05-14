@@ -70,10 +70,10 @@ const validDeviceCode: DeviceCodeResponse = {
 // ============================================================================
 
 describe("requestDeviceCode", () => {
-  it("POSTs to /v1/device/code with client_name", async () => {
+  it("POSTs to /device/code with client_name", async () => {
     const { fetch, calls } = makeFetch([{ body: validDeviceCode }]);
     await requestDeviceCode("https://api.test", fetch);
-    assert.match(calls[0].url, /\/v1\/device\/code$/);
+    assert.match(calls[0].url, /\/device\/code$/);
     assert.deepEqual(calls[0].body, { client_name: "@oldfamilyrecipe/mcp" });
   });
 
@@ -119,10 +119,10 @@ describe("requestDeviceCode", () => {
 // ============================================================================
 
 describe("pollOnce", () => {
-  it("POSTs to /v1/device/token with the device_code", async () => {
+  it("POSTs to /device/token with the device_code", async () => {
     const { fetch, calls } = makeFetch([{ body: { error: "authorization_pending" } }]);
     await pollOnce("https://api.test", fetch, "DC_xyz");
-    assert.match(calls[0].url, /\/v1\/device\/token$/);
+    assert.match(calls[0].url, /\/device\/token$/);
     assert.deepEqual(calls[0].body, { device_code: "DC_xyz" });
   });
 
@@ -345,8 +345,8 @@ describe("runDeviceFlow", () => {
       fetchImpl: fetch,
     });
 
-    assert.equal(calls[0].url, "https://api.test/v1/device/code");
-    assert.equal(calls[1].url, "https://api.test/v1/device/token");
+    assert.equal(calls[0].url, "https://api.test/device/code");
+    assert.equal(calls[1].url, "https://api.test/device/token");
   });
 });
 

@@ -7,9 +7,9 @@
  * + browser path is unavailable (no display, --no-browser, port bind
  * failure):
  *
- *   1. POST /v1/device/code  → device_code + user_code + verification_uri
+ *   1. POST /device/code  → device_code + user_code + verification_uri
  *   2. Print the user_code + URL to stderr (stdio MCP can't talk to chat)
- *   3. POST /v1/device/token every `interval` seconds
+ *   3. POST /device/token every `interval` seconds
  *      - "authorization_pending" → keep polling
  *      - "slow_down"             → double the interval and keep polling
  *      - "expired_token"         → fail with a clear restart instruction
@@ -119,7 +119,7 @@ export async function requestDeviceCode(
   apiBase: string,
   fetchImpl: typeof fetch,
 ): Promise<DeviceCodeResponse> {
-  const res = await fetchImpl(`${apiBase}/v1/device/code`, {
+  const res = await fetchImpl(`${apiBase}/device/code`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ client_name: "@oldfamilyrecipe/mcp" }),
@@ -169,7 +169,7 @@ export async function pollOnce(
   fetchImpl: typeof fetch,
   deviceCode: string,
 ): Promise<PollResult> {
-  const res = await fetchImpl(`${apiBase}/v1/device/token`, {
+  const res = await fetchImpl(`${apiBase}/device/token`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ device_code: deviceCode }),

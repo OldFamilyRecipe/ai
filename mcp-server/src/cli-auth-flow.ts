@@ -215,7 +215,7 @@ export async function runCliAuthFlow(
 
   // Exchange code + verifier for the API key.
   opts.print("Approval received. Exchanging for API key...");
-  const exchangeRes = await fetchImpl(`${apiBase}/v1/cli-auth/token`, {
+  const exchangeRes = await fetchImpl(`${apiBase}/cli-auth/token`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({

@@ -27,9 +27,16 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { handleRecipeCreate, handleRecipeImportImage, handleRecipeSearch, handleRecipeList, handleRecipeUpdate, handleRecipeDelete, handleSageChat, handleSageMealPlan, handleMealPlanGet, handleMealPlanUpdate, handleImageUpload, handleFamilyInvite, handleFamilyTree } from "./handlers.js";
+import { configFromEnv } from "./config.js";
+import { resolveAuth } from "./auth-resolve.js";
 
-const API_KEY = process.env.OFR_API_KEY ?? "";
-const API_BASE = process.env.OFR_API_URL ?? "https://api.oldfamilyrecipe.com";
+// Populated by main() before the MCP server starts handling requests.
+// If onboarding fails (e.g., no env var, no credentials file, AND the
+// browser/device flow could not complete — typical for sandbox/CI), this
+// stays empty and tool calls return the friendly onboarding message instead
+// of crashing with a cryptic 401.
+let API_KEY = "";
+let API_BASE = configFromEnv().apiBase;
 
 const server = new Server(
   { name: "oldfamilyrecipe", version: "0.1.0" },
@@ -368,6 +375,38 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 // --- Start ---
 async function main() {
+  // Resolve auth BEFORE accepting tool calls. Precedence:
+  //   1. OFR_API_KEY env var          (back-compat — power users)
+  //   2. ~/.config/oldfamilyrecipe/credentials.json
+  //   3. PKCE + browser flow          (default first-run UX)
+  //   4. RFC 8628 device-code flow    (headless fallback)
+  //
+  // If resolution fails (e.g., sandbox with no browser AND no env var),
+  // we still start the server — the tool handlers surface a friendly
+  // onboarding message instead of crashing with a cryptic 401.
+  const envConfig = configFromEnv();
+  try {
+    const resolved = await resolveAuth({
+      envConfig,
+      print: (line) => process.stderr.write(line + "\n"),
+    });
+    API_KEY = resolved.config.apiKey ?? "";
+    API_BASE = resolved.config.apiBase;
+    if (resolved.source !== "env") {
+      console.error(`[OFR MCP] Authenticated via ${resolved.source}.`);
+    }
+  } catch (err) {
+    // Onboarding failed (user dismissed browser, no network, etc.).
+    // Don't crash — let the friendly notConfiguredResponse() guide the
+    // user. They can retry by restarting their MCP client, or set the
+    // OFR_API_KEY env var directly.
+    console.error(
+      `[OFR MCP] Onboarding did not complete: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    API_KEY = "";
+    API_BASE = envConfig.apiBase;
+  }
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
@@ -377,7 +416,7 @@ async function main() {
   // rather than crashing silently.
   if (!API_KEY) {
     console.error(
-      "[OFR MCP] Started without OFR_API_KEY. Tools will return an onboarding " +
+      "[OFR MCP] Started without an API key. Tools will return an onboarding " +
       "message until configured. Get a free key at " +
       "https://oldfamilyrecipe.ai/dashboard"
     );

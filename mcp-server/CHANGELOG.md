@@ -2,6 +2,55 @@
 
 All notable changes to `@oldfamilyrecipe/mcp-server` will be documented here.
 
+## [0.3.0] - 2026-05-13
+
+### Added — first-run onboarding
+
+- **One-click browser auth (PKCE + localhost) on first run.** Running
+  `npx @oldfamilyrecipe/mcp-server` with no API key now opens a browser
+  to `oldfamilyrecipe.com/cli-auth`, the user clicks Approve, and the
+  CLI catches the redirect on a one-shot `127.0.0.1` listener. No more
+  "get a 401 → go find the API keys page → copy/paste → restart"
+  friction.
+- **RFC 8628 device-code flow as a headless fallback.** Triggered
+  automatically when the browser can't be opened (no display, no
+  `DISPLAY`, port bind failure) or explicitly opted into via
+  `OFR_NO_BROWSER=1`. Prints a user code + `oldfamilyrecipe.com/device`
+  URL and polls until the user approves.
+- **XDG-compliant credentials file at
+  `~/.config/oldfamilyrecipe/credentials.json`** (mode `0600`,
+  atomic write). Honors `XDG_CONFIG_HOME` on POSIX and `APPDATA` on
+  Windows. Override the location for tests/sandboxing with
+  `OFR_CONFIG_DIR=/path/to/dir`.
+- **New auth-resolution chain in `auth-resolve.ts`** — first hit wins:
+  `OFR_API_KEY` env var → credentials file → PKCE+browser → device flow.
+- 33 new unit tests covering the resolution precedence, PKCE primitives,
+  CSRF state validation, RFC 8628 state machine (pending / slow_down /
+  expired / approved), credentials round-trip + 0600 mode.
+
+### Backward compatibility
+
+- **`OFR_API_KEY=ofr_xxx` env var still works exactly as before.** It's
+  the first step in the resolution chain — power users with the env var
+  set will see zero behavior change. The new browser/device flows only
+  kick in when the env var is empty AND there's no stored credentials
+  file. Existing MCP clients (Claude Desktop, Cursor, etc.) with
+  `"env": { "OFR_API_KEY": "ofr_..." }` configured do not need to be
+  changed.
+- The friendly "OFR_API_KEY is not configured" tool-call response is
+  preserved as a final safety net — if onboarding fails (e.g.,
+  sandboxed CI with no browser AND no env var AND no device-flow
+  network), the server still starts and the user sees a helpful message
+  instead of a cryptic 401.
+
+### Internal
+
+- New `config.ts` module (`configFromEnv`, `DEFAULT_API_BASE`) so the
+  resolver can be unit-tested without importing `index.ts`.
+- Test runner now uses `--test-force-exit` (the PKCE tests bind a real
+  localhost server; `undici`'s keep-alive socket pool pins the event
+  loop open until forced shut).
+
 ## [0.2.0] — 2026-05-03
 
 ### Added

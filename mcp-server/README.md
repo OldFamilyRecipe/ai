@@ -9,9 +9,39 @@ Works with Claude Desktop, Claude Code, Cursor, Cline, Windsurf, or any MCP-comp
 
 ## Quickstart
 
-**1. Get an API key** at [oldfamilyrecipe.ai/dashboard](https://oldfamilyrecipe.ai/dashboard). Free tier: 250 Sage messages/month + unlimited recipe storage.
+**1. Add to your MCP client config.** For Claude Desktop, edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
-**2. Add to your MCP client config.** For Claude Desktop, edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "oldfamilyrecipe": {
+      "command": "npx",
+      "args": ["-y", "@oldfamilyrecipe/mcp-server"]
+    }
+  }
+}
+```
+
+Same pattern for Cursor, Claude Code, Cline, Windsurf.
+
+**2. Restart your client.** On first run, your browser will open
+automatically to [oldfamilyrecipe.com/cli-auth](https://oldfamilyrecipe.com/cli-auth)
+— sign in (or create a free account — no credit card), click Approve, and the
+CLI catches the redirect on a one-shot `127.0.0.1` listener. Credentials
+persist to `~/.config/oldfamilyrecipe/credentials.json` (`0600`, owner-only)
+so subsequent runs skip onboarding.
+
+**3. Ask your assistant:**
+> "Save my mom's stuffing recipe from this photo." (attach image)
+
+Free tier: 250 Sage messages/month + unlimited recipe storage.
+
+### Power-user setup (skip the browser)
+
+If you'd rather paste an API key directly — useful for CI, container
+images, or shared dev machines — generate one at
+[oldfamilyrecipe.ai/dashboard](https://oldfamilyrecipe.ai/dashboard) and
+pass it via the `OFR_API_KEY` env var:
 
 ```json
 {
@@ -25,10 +55,16 @@ Works with Claude Desktop, Claude Code, Cursor, Cline, Windsurf, or any MCP-comp
 }
 ```
 
-Same pattern for Cursor, Claude Code, Cline, Windsurf.
+The env var always wins over the credentials file, so existing
+configurations from `0.2.x` and earlier keep working with no changes.
 
-**3. Restart your client and ask:**
-> "Save my mom's stuffing recipe from this photo." (attach image)
+### Headless / no-display environments
+
+If you're running on a server with no browser (CI, SSH session,
+container), set `OFR_NO_BROWSER=1` and the CLI falls back to the
+RFC 8628 device-code flow — it prints a short user code and a URL,
+you finish setup from any other machine, and the CLI polls until you
+approve.
 
 ## Tools (13)
 

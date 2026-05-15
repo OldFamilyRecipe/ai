@@ -1,4 +1,6 @@
 /**
+ * Copyright (c) 2025-2026 Andy Rockwell. All rights reserved.
+ *
  * Tests for path validation, extension whitelist, size cap, and magic-byte
  * sniff on `recipe_import_image`.
  *

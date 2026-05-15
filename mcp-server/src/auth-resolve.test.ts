@@ -278,6 +278,33 @@ describe("resolveAuth — PKCE + localhost flow (default first-run path)", () =>
     );
   });
 
+  it("propagates a non-CliAuthFlowError thrown by the PKCE flow without falling back", async () => {
+    // Defensive — if the PKCE flow throws something we don't know how to
+    // classify (a generic JS error, a network library exception, etc.) we
+    // MUST NOT silently retry through the device-code channel. Otherwise an
+    // attacker who can poison the local environment could force a fallback
+    // path the user didn't choose.
+    let deviceFlowCalled = false;
+    await assert.rejects(
+      () =>
+        resolveAuth({
+          envConfig: { apiKey: null, apiBase },
+          readCreds: () => null,
+          writeCreds: () => {},
+          cliAuthFlow: async () => {
+            throw new Error("ENOTFOUND oldfamilyrecipe.com");
+          },
+          deviceFlow: async () => {
+            deviceFlowCalled = true;
+            return freshFromFlow;
+          },
+          print: () => {},
+        }),
+      /ENOTFOUND/,
+    );
+    assert.equal(deviceFlowCalled, false, "must NOT fall back on unknown errors");
+  });
+
   it("OFR_NO_BROWSER=1 env var skips the PKCE flow entirely", async () => {
     const original = process.env.OFR_NO_BROWSER;
     process.env.OFR_NO_BROWSER = "1";

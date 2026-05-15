@@ -1,4 +1,6 @@
 /**
+ * Copyright (c) 2025-2026 Andy Rockwell. All rights reserved.
+ *
  * Tests for the MCP handler → API wire format. We mock global fetch
  * so each test can assert the EXACT path, method, and body the MCP
  * server would send to the OFR API. The pre-2026-04-30 bugs were:

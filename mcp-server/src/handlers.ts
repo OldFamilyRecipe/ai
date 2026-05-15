@@ -1,5 +1,18 @@
 /**
- * Recipe Protocol MCP handlers.
+ * Copyright (c) 2025-2026 Andy Rockwell. All rights reserved.
+ *
+ * Recipe Protocol MCP handlers — one async function per tool name in
+ * src/tools.ts. Each handler:
+ *   - validates the (intentionally loose) `args: Record<string, unknown>`
+ *     it receives from the model,
+ *   - calls the OFR HTTP API via the shared `callApi()` helper that adds
+ *     Bearer + X-API-Key auth headers,
+ *   - returns a `ToolResult` with a single `text` content block. Error
+ *     paths set `isError: true` so the MCP client can render the message
+ *     as a chat-visible failure instead of a successful result.
+ *
+ * The MCP SDK does NOT enforce the JSON Schema in tools.ts at runtime, so
+ * every handler here is responsible for its own argument validation.
  */
 
 import { readFileSync } from "fs";

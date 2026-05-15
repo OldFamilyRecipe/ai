@@ -1,4 +1,6 @@
 /**
+ * Copyright (c) 2025-2026 Andy Rockwell. All rights reserved.
+ *
  * Path + size + extension + content validation for `recipe_import_image`.
  *
  * Hardens the tool against prompt-injection attacks where an LLM is

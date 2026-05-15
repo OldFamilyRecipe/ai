@@ -285,6 +285,85 @@ describe("runCliAuthFlow", () => {
     );
   });
 
+  it("throws exchange_failed when token endpoint returns 200 but body is missing api_key/user_id", async () => {
+    // Defense: a misconfigured backend (or a man-in-the-middle that strips
+    // fields) MUST NOT yield a partial credential we silently accept.
+    await assert.rejects(
+      runCliAuthFlow({
+        apiBase: "https://api.example.test",
+        dashboardUrl: "https://oldfamilyrecipe.example.test",
+        print: () => {},
+        openBrowser: async (url) => {
+          const parsed = new URL(url);
+          const state = parsed.searchParams.get("state")!;
+          const redirectUri = parsed.searchParams.get("redirect_uri")!;
+          setTimeout(() => {
+            fetch(`${redirectUri}/?code=ABC&state=${state}`).catch(() => {});
+          }, 10);
+        },
+        fetchImpl: (async () =>
+          new Response('{"api_key":"only_key_no_user_id"}', { status: 200 })) as typeof fetch,
+      }),
+      (err: unknown) => {
+        assert.ok(err instanceof CliAuthFlowError);
+        assert.equal(err.code, "exchange_failed");
+        assert.match(err.message, /incomplete/i);
+        return true;
+      },
+    );
+  });
+
+  it("infers staging dashboard URL by stripping the leading 'api.' from a non-prod host", async () => {
+    // When apiBase is staging (api.staging.example.com), the dashboardUrl
+    // should default to staging.example.com — same swap rule as production.
+    let capturedDashboard = "";
+    await runCliAuthFlow({
+      apiBase: "https://api.staging.example.com",
+      // Intentionally omit dashboardUrl so inferDashboardUrl runs.
+      print: () => {},
+      openBrowser: async (url) => {
+        capturedDashboard = new URL(url).origin;
+        const parsed = new URL(url);
+        const state = parsed.searchParams.get("state")!;
+        const redirectUri = parsed.searchParams.get("redirect_uri")!;
+        setTimeout(() => {
+          fetch(`${redirectUri}/?code=ABC&state=${state}`).catch(() => {});
+        }, 10);
+      },
+      fetchImpl: (async () =>
+        new Response(
+          JSON.stringify({ api_key: "ofr_test", user_id: "u-1" }),
+          { status: 200 },
+        )) as typeof fetch,
+    });
+    assert.equal(capturedDashboard, "https://staging.example.com");
+  });
+
+  it("throws port_bind_failed when the preferred port is already taken", async () => {
+    // Squat the port first so the second bind has nowhere to land.
+    const squatter = await bindLocalServer();
+    try {
+      await assert.rejects(
+        runCliAuthFlow({
+          apiBase: "https://api.example.test",
+          dashboardUrl: "https://oldfamilyrecipe.example.test",
+          port: squatter.port,
+          print: () => {},
+          openBrowser: async () => {},
+          fetchImpl: (async () => new Response()) as typeof fetch,
+        }),
+        (err: unknown) => {
+          assert.ok(err instanceof CliAuthFlowError);
+          assert.equal(err.code, "port_bind_failed");
+          return true;
+        },
+      );
+    } finally {
+      squatter.server.closeAllConnections();
+      squatter.server.close();
+    }
+  });
+
   it("throws timeout when no callback arrives", async () => {
     await assert.rejects(
       runCliAuthFlow({

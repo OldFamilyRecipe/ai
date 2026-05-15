@@ -1,0 +1,14 @@
+{
+  "all": true,
+  "include": ["src/**/*.ts"],
+  "exclude": [
+    "src/**/*.test.ts",
+    "dist/**",
+    "node_modules/**",
+    ".test-tmp/**"
+  ],
+  "extension": [".ts"],
+  "reports-dir": "coverage",
+  "skip-full": false,
+  "clean": true
+}

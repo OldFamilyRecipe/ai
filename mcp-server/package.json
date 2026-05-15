@@ -1,6 +1,6 @@
 {
   "name": "@oldfamilyrecipe/mcp-server",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Official MCP server for Old Family Recipe — let Claude, ChatGPT, Cursor and any Model Context Protocol AI assistant save, search, and preserve family recipes (with provenance) in your cookbook. Includes OCR import of handwritten recipe cards, Sage AI chat, meal planning, and family sharing.",
   "main": "dist/index.js",
   "bin": {
@@ -17,6 +17,8 @@
     "start": "node dist/index.js",
     "dev": "tsc --watch",
     "test": "find src -name '*.test.ts' -print0 | xargs -0 tsx --test --test-force-exit",
+    "coverage": "c8 --reporter=text --reporter=html --reporter=json-summary npm test",
+    "coverage:check": "c8 --reporter=text --check-coverage --branches=85 --statements=90 --functions=90 --lines=90 npm test",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -82,10 +84,17 @@
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
+    "c8": "^11.0.0",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0"
+  },
+  "overrides": {
+    "fast-uri": "^3.1.2",
+    "hono": "^4.12.18",
+    "ip-address": "^10.2.0",
+    "express-rate-limit": "^8.5.2"
   }
 }

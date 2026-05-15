@@ -2,6 +2,48 @@
 
 All notable changes to `@oldfamilyrecipe/mcp-server` will be documented here.
 
+## [0.3.1] — 2026-05-15
+
+### Security
+- **Pinned patched transitive dependencies via `package.json` overrides.**
+  `npm audit` was reporting 4 vulnerabilities (1 HIGH `fast-uri`
+  path-traversal, 3 MEDIUM: `hono` cluster, `ip-address` XSS,
+  `express-rate-limit` cascade) — all in transitive dependencies of
+  `@modelcontextprotocol/sdk` that live in HTTP transport code we don't
+  import (we use stdio). They were not exploitable in our code path but
+  were visible to every developer running `npm audit` after installing us.
+  Pinned to `fast-uri ^3.1.2`, `hono ^4.12.18`, `ip-address ^10.2.0`,
+  `express-rate-limit ^8.5.2`. Result: `found 0 vulnerabilities`.
+
+### Fixed
+- **MCP handshake reports the correct package version.** The `Server`
+  constructor in `src/index.ts` was hardcoding `version: "0.1.0"`, so
+  Claude Desktop / Cursor / etc. saw the wrong version in their handshake
+  logs even after we shipped 0.3.0. Now reads from `package.json` at
+  runtime via `createRequire` so the values cannot drift again.
+
+### Internal
+- **Tool registry extracted to `src/tools.ts`.** `src/index.ts` shrinks
+  from 442 → 208 lines (under the 400-line preflight threshold) and the
+  exported `RECIPE_TOOLS` array has its own shape-check tests
+  (`tools.test.ts`) — name uniqueness, schema validity, registry-vs-union
+  parity. Public API unchanged; the published binary entry point is
+  identical.
+- **`c8` coverage tooling added.** `npm run coverage` (text + html +
+  json-summary reports) and `npm run coverage:check` (CI-grade
+  thresholds). Baseline this release: 82% statements / 80% branches /
+  86% functions across `src/`.
+- **Coverage backfill on critical-path branches.**
+  `auth-resolve.ts`: 73% → 79% branches (new test confirms a
+    non-`CliAuthFlowError` propagates instead of silently falling back to
+    the device-code channel — the security-relevant branch).
+  `cli-auth-flow.ts`: 76% → 78% branches (new tests: incomplete
+    token-exchange response, `inferDashboardUrl` staging swap,
+    `port_bind_failed` via squatted port).
+  `config.ts`: 80% → 100% (new `config.test.ts`).
+  `tools.ts`: 100% (new file with new tests).
+- **Copyright header normalization** across all `src/*.ts` files.
+
 ## [0.3.0] - 2026-05-13
 
 ### Added — first-run onboarding

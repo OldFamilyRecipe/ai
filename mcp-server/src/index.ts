@@ -20,6 +20,8 @@
  *   }
  */
 
+import { createRequire } from "node:module";
+
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -30,6 +32,15 @@ import { handleRecipeCreate, handleRecipeImportImage, handleRecipeSearch, handle
 import { configFromEnv } from "./config.js";
 import { resolveAuth } from "./auth-resolve.js";
 
+// Read package.json so the version reported in the MCP handshake always
+// matches the published npm version. Hardcoding here drifts (we shipped 0.3.0
+// reporting "0.1.0" until 2026-05-15). createRequire works in ESM without an
+// experimental flag and resolves package.json relative to the compiled
+// dist/index.js — npm always ships package.json, so this is safe at runtime.
+const require = createRequire(import.meta.url);
+const pkg = require("../package.json") as { version: string };
+const SERVER_VERSION = pkg.version;
+
 // Populated by main() before the MCP server starts handling requests.
 // If onboarding fails (e.g., no env var, no credentials file, AND the
 // browser/device flow could not complete — typical for sandbox/CI), this
@@ -39,7 +50,7 @@ let API_KEY = "";
 let API_BASE = configFromEnv().apiBase;
 
 const server = new Server(
-  { name: "oldfamilyrecipe", version: "0.1.0" },
+  { name: "oldfamilyrecipe", version: SERVER_VERSION },
   { capabilities: { tools: {} } }
 );
 

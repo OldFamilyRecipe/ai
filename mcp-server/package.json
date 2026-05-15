@@ -87,5 +87,11 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0"
+  },
+  "overrides": {
+    "fast-uri": "^3.1.2",
+    "hono": "^4.12.18",
+    "ip-address": "^10.2.0",
+    "express-rate-limit": "^8.5.2"
   }
 }
